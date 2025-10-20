@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Union, cast
+from typing import Dict, Iterable, List, Mapping, Sequence, Union, cast
 
 from . import best_practices
 from .document_reader import extract_keywords, read_requirements
@@ -198,6 +198,11 @@ class ScrumTeam:
                 "developers": [developer.llm_provider.as_dict() for developer in self.developers],
                 "testers": [tester.llm_provider.as_dict() for tester in self.testers],
             },
+            "llm_providers": {
+                "architect": self.architect.llm_provider.as_dict(),
+                "developers": [developer.llm_provider.as_dict() for developer in self.developers],
+                "testers": [tester.llm_provider.as_dict() for tester in self.testers],
+            },
             "logs": logs,
         }
 
@@ -317,21 +322,6 @@ def summarize_iteration(result: Dict[str, object]) -> str:
         if key == "adr_records":
             continue
         lines.append(f"{key.title()}: {value}")
-
-    adr_entries = cast(Iterable[Dict[str, Any]], result.get("adr_decisions", []))
-    if adr_entries:
-        lines.append("\n=== Architecture Decision Records ===")
-        for entry in adr_entries:
-            identifier = entry.get("id", "ADR")
-            title = entry.get("title", "Decision")
-            status = entry.get("status", "Proposed")
-            lines.append(f"{identifier} - {title} ({status})")
-            decision = entry.get("decision")
-            if decision:
-                lines.append(f"  Decision: {decision}")
-            consequences = entry.get("consequences")
-            if consequences:
-                lines.append(f"  Consequences: {consequences}")
 
     provider_info = result.get("llm_providers")
     if isinstance(provider_info, dict):
