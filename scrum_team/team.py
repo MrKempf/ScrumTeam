@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, cast
+from typing import Dict, Iterable, List, Mapping, Sequence, Union, cast
 
 from . import best_practices
 from .document_reader import extract_keywords, read_requirements
-from .roles import TEAM_TEMPLATE, Architect, Developer, Tester
+from .roles import LLMProviderSpec, TEAM_TEMPLATE, Architect, Developer, Role, Tester
 
 
 def _format_output(payload: object) -> str:
@@ -31,6 +31,51 @@ class ScrumTeam:
     developers: Sequence[Developer]
     testers: Sequence[Tester]
     practices: Dict[str, List[str]]
+
+    def configure_llm_providers(
+        self,
+        providers: Mapping[str, Union[LLMProviderSpec, Sequence[LLMProviderSpec]]],
+    ) -> None:
+        """Assign LLM providers to the architect, developers, and testers.
+
+        ``providers`` accepts the following structure::
+
+            {
+                "architect": "openai:gpt-4o",
+                "developers": ["openai:gpt-4o-mini", "ollama:llama3", ...],
+                "testers": "ollama:llama3",
+            }
+
+        Single values apply to every member of that discipline. A sequence must match the
+        number of developers or testers respectively.
+        """
+
+        if "architect" in providers:
+            self.architect.set_llm_provider(providers["architect"])
+
+        if "developers" in providers:
+            developer_config = providers["developers"]
+            self._apply_role_provider(self.developers, developer_config)
+
+        if "testers" in providers:
+            tester_config = providers["testers"]
+            self._apply_role_provider(self.testers, tester_config)
+
+    @staticmethod
+    def _apply_role_provider(
+        roles: Sequence[Role],
+        config: Union[LLMProviderSpec, Sequence[LLMProviderSpec]],
+    ) -> None:
+        if isinstance(config, Sequence) and not isinstance(config, (str, bytes)):
+            if len(config) != len(roles):
+                raise ValueError(
+                    "Provider configuration length must match the number of roles in the discipline."
+                )
+            for role, role_config in zip(roles, config):
+                role.set_llm_provider(role_config)
+        else:
+            for role in roles:
+                role.set_llm_provider(config)
 
     @classmethod
     def default(cls) -> "ScrumTeam":
@@ -102,6 +147,11 @@ class ScrumTeam:
             "quality_assurance": {
                 "code_review": "All developer outputs include mandatory peer review checklists.",
                 "testing": "Test plans align with automated and exploratory coverage for every requirement.",
+            },
+            "llm_providers": {
+                "architect": self.architect.llm_provider.as_dict(),
+                "developers": [developer.llm_provider.as_dict() for developer in self.developers],
+                "testers": [tester.llm_provider.as_dict() for tester in self.testers],
             },
             "logs": logs,
         }
@@ -184,6 +234,33 @@ def summarize_iteration(result: Dict[str, object]) -> str:
     architecture: Dict[str, str] = result["architecture"]  # type: ignore[assignment]
     for key, value in architecture.items():
         lines.append(f"{key.title()}: {value}")
+
+    provider_info = result.get("llm_providers")
+    if isinstance(provider_info, dict):
+        lines.append("\n=== LLM Provider Assignments ===")
+
+        def describe(entry: object) -> str:
+            if isinstance(entry, dict):
+                provider_name = str(entry.get("provider") or entry.get("name") or "unknown")
+                deployment = entry.get("deployment") or entry.get("location")
+                model = entry.get("model")
+                detail = f"{provider_name}"
+                if deployment:
+                    detail += f" ({deployment})"
+                if model:
+                    detail += f" model={model}"
+                return detail
+            return str(entry)
+
+        architect_provider = provider_info.get("architect")
+        if architect_provider:
+            lines.append(f"Architect: {describe(architect_provider)}")
+
+        for index, provider in enumerate(provider_info.get("developers", []), start=1):
+            lines.append(f"Developer {index}: {describe(provider)}")
+
+        for index, provider in enumerate(provider_info.get("testers", []), start=1):
+            lines.append(f"Tester {index}: {describe(provider)}")
 
     lines.append("\n=== Implementation Plans ===")
     for index, plan in enumerate(result["implementation_plans"], start=1):

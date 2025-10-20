@@ -3,9 +3,74 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Mapping, Union
 
 from .best_practices import BEST_PRACTICES
+
+
+@dataclass
+class LLMProviderConfig:
+    """Configuration describing which LLM backs a role."""
+
+    provider: str
+    deployment: str = "cloud"
+    model: str | None = None
+
+    def as_dict(self) -> Dict[str, str]:
+        """Return a serialisable representation of the provider configuration."""
+
+        data: Dict[str, str] = {
+            "provider": self.provider,
+            "deployment": self.deployment,
+        }
+        if self.model:
+            data["model"] = self.model
+        return data
+
+    def describe(self) -> str:
+        """Create a short human-friendly summary of the provider setup."""
+
+        if self.model:
+            return f"{self.provider} ({self.deployment}, model={self.model})"
+        return f"{self.provider} ({self.deployment})"
+
+
+LLMProviderSpec = Union["LLMProviderConfig", str, Mapping[str, Any]]
+
+
+def _coerce_llm_provider(spec: LLMProviderSpec) -> LLMProviderConfig:
+    """Normalise a user-supplied provider spec into an ``LLMProviderConfig``."""
+
+    if isinstance(spec, LLMProviderConfig):
+        return spec
+
+    if isinstance(spec, str):
+        provider_part, model = (spec.split(":", 1) + [None])[:2]
+        provider = provider_part.strip()
+        detected_model = model.strip() if model else None
+        deployment = "local" if provider.lower() in {"ollama", "local"} else "cloud"
+        # If the provider itself encodes both the runtime and the name (e.g. "local:ollama"),
+        # prefer explicit deployment instructions.
+        if provider.lower() == "local" and detected_model:
+            provider, detected_model = detected_model, None
+        return LLMProviderConfig(provider=provider, deployment=deployment, model=detected_model)
+
+    if isinstance(spec, Mapping):
+        data = dict(spec)
+        provider_value = data.get("provider") or data.get("name")
+        if not provider_value:
+            raise ValueError("Provider configuration dictionaries must include a 'provider' key.")
+        provider = str(provider_value)
+        deployment_value = data.get("deployment") or data.get("location")
+        if deployment_value is None:
+            deployment = "local" if provider.lower() == "ollama" else "cloud"
+        else:
+            deployment = str(deployment_value)
+        model_value = data.get("model")
+        model = None if model_value is None else str(model_value)
+        return LLMProviderConfig(provider=provider, deployment=deployment, model=model)
+
+    raise TypeError("Unsupported provider specification. Use a string, mapping, or LLMProviderConfig instance.")
 
 
 @dataclass
@@ -15,6 +80,9 @@ class Role:
     name: str
     focus_areas: List[str]
     responsibilities: List[str]
+    llm_provider: LLMProviderConfig = field(
+        default_factory=lambda: LLMProviderConfig(provider="openai", deployment="cloud")
+    )
 
     def summarize(self) -> str:
         return f"{self.name}: focus on {', '.join(self.focus_areas)}"
@@ -23,6 +91,11 @@ class Role:
         """Describe how the role will react to an additional instruction."""
 
         return f"{self.name} acknowledges instruction '{instruction}' and will incorporate it into upcoming work."
+
+    def set_llm_provider(self, provider: LLMProviderSpec) -> None:
+        """Assign a new LLM provider to the role."""
+
+        self.llm_provider = _coerce_llm_provider(provider)
 
 
 @dataclass
@@ -145,6 +218,7 @@ TEAM_TEMPLATE = {
             "Transform requirements into architecture decisions.",
             "Maintain ADR repository and architecture guardrails.",
         ],
+        llm_provider=LLMProviderConfig(provider="openai", deployment="cloud", model="gpt-4o"),
     ),
     "developers": [
         Developer(
@@ -152,18 +226,21 @@ TEAM_TEMPLATE = {
             focus_areas=["backend", "APIs"],
             responsibilities=["Implement services", "Review peers"],
             skills=["Python", "Go"],
+            llm_provider=LLMProviderConfig(provider="openai", deployment="cloud", model="gpt-4o-mini"),
         ),
         Developer(
             name="Developer B",
             focus_areas=["frontend", "UX"],
             responsibilities=["Develop UI", "Maintain accessibility"],
             skills=["TypeScript", "React"],
+            llm_provider=LLMProviderConfig(provider="openai", deployment="cloud", model="gpt-4o-mini"),
         ),
         Developer(
             name="Developer C",
             focus_areas=["DevOps", "Tooling"],
             responsibilities=["CI/CD", "Observability"],
             skills=["Terraform", "Kubernetes"],
+            llm_provider=LLMProviderConfig(provider="ollama", deployment="local", model="llama3"),
         ),
     ],
     "testers": [
@@ -172,18 +249,21 @@ TEAM_TEMPLATE = {
             focus_areas=["automation", "regression"],
             responsibilities=["Maintain automated suite"],
             specialties=["Selenium", "Playwright"],
+            llm_provider=LLMProviderConfig(provider="openai", deployment="cloud", model="gpt-4o-mini"),
         ),
         Tester(
             name="Tester B",
             focus_areas=["performance", "security"],
             responsibilities=["Performance testing", "Security validation"],
             specialties=["k6", "ZAP"],
+            llm_provider=LLMProviderConfig(provider="ollama", deployment="local", model="llama3"),
         ),
         Tester(
             name="Tester C",
             focus_areas=["usability", "accessibility"],
             responsibilities=["UX validation", "Assist UAT"],
             specialties=["WCAG", "Manual"],
+            llm_provider=LLMProviderConfig(provider="openai", deployment="cloud", model="gpt-4o-mini"),
         ),
     ],
     "best_practices": BEST_PRACTICES,
