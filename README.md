@@ -61,8 +61,27 @@ explicit control by specifying ``provider``, ``model``, and optionally ``deploym
 
 - Architecture decisions tailored to requirement keywords with ADR guidance.
 - Implementation plans for each developer with embedded peer-review steps.
-- Test strategies for each tester covering automation, performance, security, and UX.
+- Source code scaffolds and paired unit tests aligned with the agreed architecture decisions.
+- Test strategies, executable scripts, and risk-oriented summaries for every tester.
 - Comprehensive checklist of contemporary software engineering best practices.
 - Quality assurance guardrails ensuring all generated work is reviewed and tested.
 - Full interaction log of every prompt and response so outputs remain auditable.
 - Follow-up handling so product owners can steer subsequent sprints via prompts.
+
+## Sprint Outputs
+
+The simulated sprint produces a complete engineering package suitable for downstream
+automation:
+
+- **ADR Decisions** – Architecture decision records captured alongside rationale and
+  consequences to support traceability.
+- **Source Code** – Role-specific module scaffolds reflecting the approved design and
+  serving as a starting point for implementation.
+- **Unit Tests** – Parametrised tests linked to each requirement to enforce coverage
+  expectations from day one.
+- **Test Plans** – Strategy documents covering functional and non-functional
+  validations, generated per tester specialty.
+- **Test Scripts** – Executable step-by-step instructions referencing required tools
+  and environments.
+- **Test Summaries** – Condensed reporting of anticipated coverage, risks, and next
+  actions for quality stakeholders.

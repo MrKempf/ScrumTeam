@@ -102,7 +102,9 @@ class Role:
 class Architect(Role):
     """Architect responsible for architecture decisions."""
 
-    def produce_architecture(self, requirements: Iterable[str], keywords: Iterable[str]) -> Dict[str, str]:
+    def produce_architecture(
+        self, requirements: Iterable[str], keywords: Iterable[str]
+    ) -> Dict[str, object]:
         keyword_set = {keyword.lower() for keyword in keywords}
         pattern = "layered-service"
         if {"realtime", "latency"} & keyword_set:
@@ -113,6 +115,35 @@ class Architect(Role):
             pattern = "data-lakehouse"
 
         critical_quality = "security" if "security" in keyword_set else "reliability"
+
+        requirements_list = list(requirements)
+        adr_records = [
+            {
+                "id": "ADR-001",
+                "title": f"Adopt {pattern} architecture",
+                "status": "Accepted",
+                "context": (
+                    "Requirements emphasise {qualities} which align with the selected pattern."
+                ).format(
+                    qualities=", ".join(requirements_list) or "stakeholder goals"
+                ),
+                "decision": (
+                    "We will implement a {pattern} architecture to balance {quality} and delivery speed."
+                ).format(pattern=pattern, quality=critical_quality),
+                "consequences": (
+                    "Engineering teams must enforce contract-first APIs, shared observability, and "
+                    "document all integration patterns."
+                ),
+            },
+            {
+                "id": "ADR-002",
+                "title": "Centralise decision records",
+                "status": "Accepted",
+                "context": "Teams require visibility into architectural intent and trade-offs.",
+                "decision": "Store ADRs alongside source code with change history reviewed in pull requests.",
+                "consequences": "Architecture changes trigger reviews from architect and lead developer.",
+            },
+        ]
 
         architecture = {
             "pattern": pattern,
@@ -125,6 +156,7 @@ class Architect(Role):
             "governance": (
                 "Architect collaborates with developers to review design diagrams before coding."
             ),
+            "adr_records": adr_records,
         }
         return architecture
 
@@ -144,8 +176,9 @@ class Developer(Role):
     def create_implementation_plan(
         self,
         requirements: Iterable[str],
-        architecture: Dict[str, str],
+        architecture: Dict[str, object],
     ) -> Dict[str, List[str]]:
+        pattern = str(architecture.get("pattern", "layered-service"))
         plan: Dict[str, List[str]] = {
             "tasks": [],
             "code_review": [
@@ -154,7 +187,7 @@ class Developer(Role):
         }
         for requirement in requirements:
             plan["tasks"].append(
-                f"Implement feature for: {requirement} aligned with {architecture['pattern']} pattern."
+                f"Implement feature for: {requirement} aligned with {pattern} pattern."
             )
         plan["tasks"].append("Integrate static analysis and continuous integration pipelines.")
         return plan
@@ -167,6 +200,88 @@ class Developer(Role):
         ]
         authored_plan.setdefault("review_notes", []).extend(comments)
         return comments
+
+    def produce_source_code(
+        self,
+        requirements: Iterable[str],
+        architecture: Dict[str, object],
+    ) -> Dict[str, str]:
+        requirement_list = list(requirements)
+        module_basename = self.name.lower().replace(" ", "_")
+        module_name = f"{module_basename}.py"
+        pattern = str(architecture.get("pattern", "layered-service"))
+        docstring = (
+            """Module owned by {owner} implementing the {pattern} architecture decisions."""
+        ).format(owner=self.name, pattern=pattern)
+        body_lines = [
+            "from dataclasses import dataclass",
+            "",
+            "@dataclass",
+            "class FeatureContract:",
+            "    requirement: str",
+            "    acceptance_criteria: list[str]",
+            "",
+            "def implement_feature(requirement: str) -> FeatureContract:",
+            "    \"\"\"Scaffold function produced during the sprint planning stage.\"\"\"",
+            "    return FeatureContract(",
+            "        requirement=requirement,",
+            "        acceptance_criteria=[",
+        ]
+        for requirement in requirement_list:
+            body_lines.append(f"            \"{requirement}\",")
+        body_lines.extend(
+            [
+                "        ],",
+                "    )",
+                "",
+                "__all__ = [\"FeatureContract\", \"implement_feature\"]",
+            ]
+        )
+        code = "\n".join([f'"""{docstring}"""', "", *body_lines])
+        return {
+            "owner": self.name,
+            "module": module_name,
+            "summary": "Bootstrap module scaffolding implementation aligned to ADR decisions.",
+            "code": code,
+        }
+
+    def produce_unit_tests(
+        self,
+        requirements: Iterable[str],
+        architecture: Dict[str, object],
+    ) -> Dict[str, object]:
+        requirement_list = list(requirements)
+        module_basename = self.name.lower().replace(" ", "_")
+        module_name = f"test_{module_basename}.py"
+        critical_quality = str(architecture.get("critical_quality", "quality"))
+        test_body = [
+            "import pytest",
+            "",
+            "from project import features",
+            "",
+            "@pytest.mark.parametrize(\"requirement\", [",
+        ]
+        for requirement in requirement_list:
+            test_body.append(f"    \"{requirement}\",")
+        test_body.extend(
+            [
+                "])",
+                "def test_feature_contract(requirement):",
+                "    contract = features.implement_feature(requirement)",
+                "    assert requirement in contract.acceptance_criteria",
+                "    assert contract.requirement == requirement",
+            ]
+        )
+        return {
+            "owner": self.name,
+            "module": module_name,
+            "summary": (
+                "Parametrised unit tests validating generated feature contracts across requirements."
+            ),
+            "code": "\n".join(test_body),
+            "tools": ["pytest", "coverage"],
+            "quality_focus": critical_quality,
+        }
 
     def respond_to_instruction(self, instruction: str) -> str:  # noqa: D401 - see base
         return (
@@ -184,12 +299,13 @@ class Tester(Role):
     def create_test_plan(
         self,
         requirements: Iterable[str],
-        architecture: Dict[str, str],
+        architecture: Dict[str, object],
     ) -> Dict[str, List[str]]:
+        critical_quality = str(architecture.get("critical_quality", "quality"))
         plan: Dict[str, List[str]] = {
             "strategy": [
                 "Adopt test pyramid with unit, integration, contract, and exploratory testing.",
-                f"Focus on validating {architecture['critical_quality']} risks early via automated suites.",
+                f"Focus on validating {critical_quality} risks early via automated suites.",
             ],
             "tests": [],
             "tooling": [
@@ -202,6 +318,42 @@ class Tester(Role):
                 f"Derive acceptance criteria and test cases for requirement: {requirement}"
             )
         return plan
+
+    def create_test_script(
+        self,
+        requirements: Iterable[str],
+        architecture: Dict[str, object],
+    ) -> Dict[str, object]:
+        requirement_list = list(requirements)
+        critical_quality = str(architecture.get("critical_quality", "quality"))
+        steps = [
+            "Initialise test environment with architecture guardrails validated.",
+            "Deploy latest build artifact to staging leveraging infrastructure-as-code templates.",
+            f"Seed observability dashboards to capture {critical_quality} metrics.",
+        ]
+        for requirement in requirement_list:
+            steps.append(f"Execute scenario covering requirement: {requirement}")
+        steps.append("Capture evidence and attach to test management system.")
+        return {
+            "owner": self.name,
+            "focus": self.focus_areas,
+            "steps": steps,
+            "tooling": ["pytest", "postman", "playwright", "k6"],
+        }
+
+    def summarize_testing(
+        self,
+        requirements: Iterable[str],
+        architecture: Dict[str, object],
+    ) -> Dict[str, str]:
+        requirement_list = list(requirements)
+        critical_quality = str(architecture.get("critical_quality", "quality"))
+        return {
+            "owner": self.name,
+            "coverage": f"Covered {len(requirement_list)} requirements with automated and exploratory suites.",
+            "risks": f"Ongoing monitoring of {critical_quality} metrics to detect regression.",
+            "next_steps": "Schedule regression rerun post-deployment and update accessibility charters.",
+        }
 
     def respond_to_instruction(self, instruction: str) -> str:  # noqa: D401 - see base
         return (
