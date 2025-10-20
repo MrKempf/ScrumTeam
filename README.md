@@ -31,6 +31,32 @@ reviews and automated testing.
    python main.py docs/sample_requirements.md --json
    ```
 
+## Configuring LLM Providers
+
+Each role in the virtual team can run against a different LLM provider, whether hosted
+in the cloud or locally via Ollama. Configure providers after creating the team:
+
+```python
+from scrum_team import ScrumTeam
+
+team = ScrumTeam.default()
+team.configure_llm_providers(
+    {
+        "architect": "openai:gpt-4o",          # Cloud model
+        "developers": [
+            "openai:gpt-4o-mini",                # Shared cloud configuration
+            {"provider": "ollama", "model": "llama3"},  # Local Ollama model
+            "ollama:llama3",                     # String shortcut for Ollama
+        ],
+        "testers": "ollama:llama3",             # Apply to every tester
+    }
+)
+```
+
+Strings follow the ``provider[:model]`` format. When the provider name is ``ollama`` the
+team automatically treats it as a local deployment. Dictionaries can be used for more
+explicit control by specifying ``provider``, ``model``, and optionally ``deployment``.
+
 ## Features
 
 - Architecture decisions tailored to requirement keywords with ADR guidance.
