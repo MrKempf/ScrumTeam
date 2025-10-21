@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -46,6 +47,19 @@ def test_run_iteration_generates_artifacts(tmp_path: Path) -> None:
     assert "=== Requirements ===" in summary
     assert "=== Interaction Log ===" in summary
 
+    artifact_dir = Path(result["artifact_directory"])
+    assert artifact_dir.exists()
+    snapshot = (artifact_dir / "requirements_snapshot.txt").read_text(encoding="utf-8").strip()
+    assert "Real-time telemetry ingestion" in snapshot
+    history_file = artifact_dir.parent / "history.json"
+    assert history_file.exists()
+    history = json.loads(history_file.read_text(encoding="utf-8"))
+    assert history[0]["sprint_number"] == 1
+    for artifact in result["source_code"]:
+        assert (artifact_dir / "source" / artifact["module"]).exists()
+    for unit_suite in result["unit_tests"]:
+        assert (artifact_dir / "tests" / unit_suite["module"]).exists()
+
 
 def test_follow_up_appends_actions(tmp_path: Path) -> None:
     team = ScrumTeam.default()
@@ -85,3 +99,19 @@ def test_configure_llm_providers_accepts_mixed_specs() -> None:
         "openai",
         "ollama",
     }
+
+
+def test_new_sprint_considers_previous_artifacts(tmp_path: Path) -> None:
+    requirements_path = write_requirements(tmp_path)
+
+    team = ScrumTeam.default()
+    first_result = team.run_iteration(requirements_path)
+    assert first_result["previous_artifacts"] == []
+
+    new_team = ScrumTeam.default()
+    second_result = new_team.run_iteration(requirements_path)
+    assert second_result["sprint_number"] == 2
+    assert len(second_result["previous_artifacts"]) == 1
+    previous_entry = second_result["previous_artifacts"][0]
+    assert previous_entry["sprint_number"] == 1
+    assert Path(previous_entry["artifact_directory"]).exists()
