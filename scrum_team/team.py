@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence, Union, cast
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, Union, cast
 
 from . import best_practices
 from .document_reader import extract_keywords, read_requirements

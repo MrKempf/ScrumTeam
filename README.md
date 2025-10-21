@@ -31,6 +31,22 @@ reviews and automated testing.
    python main.py docs/sample_requirements.md --json
    ```
 
+## Running Tests
+
+This repository ships with an automated regression suite that verifies the simulated
+Scrum team produces complete artifacts and respects configuration rules. Execute the
+tests with [pytest](https://docs.pytest.org/) after installing the project
+dependencies:
+
+```bash
+pip install pytest
+pytest
+```
+
+The tests create temporary requirement documents, run an iteration of the virtual team,
+and assert that architecture decisions, source code scaffolds, unit tests, and follow-up
+instructions are all persisted in the final output.
+
 ## Configuring LLM Providers
 
 Each role in the virtual team can run against a different LLM provider, whether hosted
