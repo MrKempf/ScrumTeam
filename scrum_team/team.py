@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Union, cast
+from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple, Union, cast
 
 from . import best_practices
 from .document_reader import extract_keywords, read_requirements
@@ -22,6 +22,120 @@ def _format_output(payload: object) -> str:
     except TypeError:
         return str(payload)
 
+
+def _load_previous_artifacts(artifact_root: Path) -> List[Dict[str, object]]:
+    """Return a sanitized list of previous sprint metadata from disk."""
+
+    history_file = artifact_root / "history.json"
+    if not history_file.exists():
+        return []
+
+    try:
+        data = json.loads(history_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    if not isinstance(data, list):
+        return []
+
+    history: List[Dict[str, object]] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        sprint_number = entry.get("sprint_number") or entry.get("sprint")
+        directory = entry.get("artifact_directory") or entry.get("directory")
+        requirements_document = entry.get("requirements_document")
+        try:
+            sprint_value = int(sprint_number)
+        except (TypeError, ValueError):
+            continue
+        history.append(
+            {
+                "sprint_number": sprint_value,
+                "artifact_directory": str(directory) if directory else "",
+                "requirements_document": str(requirements_document) if requirements_document else "",
+            }
+        )
+    return history
+
+
+def _prepare_artifact_directory(
+    artifact_root: Path,
+    previous_artifacts: Sequence[Mapping[str, object]],
+) -> Tuple[int, Path]:
+    """Determine the next sprint number and target directory for persistence."""
+
+    next_sprint = len(previous_artifacts) + 1
+    sprint_directory = artifact_root / f"sprint_{next_sprint:03d}"
+    return next_sprint, sprint_directory
+
+
+def _write_json(path: Path, data: object) -> None:
+    path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _persist_artifacts(
+    result: Mapping[str, object],
+    requirement_path: Path,
+    artifact_root: Path,
+    sprint_number: int,
+    sprint_directory: Path,
+    previous_artifacts: Sequence[Mapping[str, object]],
+) -> None:
+    """Persist generated artifacts to disk and update sprint history."""
+
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    sprint_directory.mkdir(parents=True, exist_ok=True)
+
+    (sprint_directory / "requirements_snapshot.txt").write_text(
+        "\n".join(cast(Iterable[str], result.get("requirements", []))) + "\n",
+        encoding="utf-8",
+    )
+
+    architecture = result.get("architecture")
+    if architecture is not None:
+        _write_json(sprint_directory / "architecture.json", architecture)
+
+    planning_dir = sprint_directory / "planning"
+    planning_dir.mkdir(exist_ok=True)
+    for index, plan in enumerate(cast(Iterable[Mapping[str, object]], result.get("implementation_plans", [])), start=1):
+        _write_json(planning_dir / f"developer_{index:02d}_plan.json", plan)
+
+    source_dir = sprint_directory / "source"
+    source_dir.mkdir(exist_ok=True)
+    for entry in cast(Iterable[Mapping[str, object]], result.get("source_code", [])):
+        module = str(entry.get("module", "module.py"))
+        code = str(entry.get("code", ""))
+        (source_dir / module).write_text(code, encoding="utf-8")
+
+    tests_dir = sprint_directory / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    for entry in cast(Iterable[Mapping[str, object]], result.get("unit_tests", [])):
+        module = str(entry.get("module", "test_module.py"))
+        code = str(entry.get("code", ""))
+        (tests_dir / module).write_text(code, encoding="utf-8")
+
+    quality_dir = sprint_directory / "quality"
+    quality_dir.mkdir(exist_ok=True)
+    for index, plan in enumerate(cast(Iterable[Mapping[str, object]], result.get("test_plans", [])), start=1):
+        _write_json(quality_dir / f"test_plan_{index:02d}.json", plan)
+    for index, script in enumerate(cast(Iterable[Mapping[str, object]], result.get("test_scripts", [])), start=1):
+        _write_json(quality_dir / f"test_script_{index:02d}.json", script)
+    for index, summary in enumerate(cast(Iterable[Mapping[str, object]], result.get("test_summaries", [])), start=1):
+        _write_json(quality_dir / f"test_summary_{index:02d}.json", summary)
+
+    logs = result.get("logs")
+    if logs is not None:
+        _write_json(sprint_directory / "interaction_log.json", logs)
+
+    entry = {
+        "sprint_number": sprint_number,
+        "artifact_directory": str(sprint_directory),
+        "requirements_document": str(requirement_path),
+    }
+
+    history = [dict(item) for item in previous_artifacts] + [entry]
+    _write_json(artifact_root / "history.json", history)
 
 @dataclass
 class ScrumTeam:
@@ -88,13 +202,24 @@ class ScrumTeam:
         )
 
     def run_iteration(self, requirement_file: str | Path) -> Dict[str, object]:
-        requirements = read_requirements(requirement_file)
+        requirement_path = Path(requirement_file)
+        requirements = read_requirements(requirement_path)
         if not requirements:
             raise ValueError("Requirement document must contain at least one requirement line.")
 
         keywords = extract_keywords(requirements)
 
         logs: List[Dict[str, str]] = []
+        artifact_root = requirement_path.resolve().parent / "sprint_artifacts"
+        previous_artifacts = _load_previous_artifacts(artifact_root)
+        if previous_artifacts:
+            logs.append(
+                {
+                    "speaker": "Scrum Master",
+                    "prompt": "Review prior sprint artifacts to inform planning.",
+                    "response": _format_output(previous_artifacts),
+                }
+            )
         logs.append(
             {
                 "speaker": "Scrum Master",
@@ -177,6 +302,11 @@ class ScrumTeam:
                 }
             )
 
+        sprint_number, sprint_directory = _prepare_artifact_directory(
+            artifact_root=artifact_root,
+            previous_artifacts=previous_artifacts,
+        )
+
         result = {
             "requirements": requirements,
             "keywords": keywords,
@@ -204,7 +334,19 @@ class ScrumTeam:
                 "testers": [tester.llm_provider.as_dict() for tester in self.testers],
             },
             "logs": logs,
+            "sprint_number": sprint_number,
+            "artifact_directory": str(sprint_directory),
+            "previous_artifacts": previous_artifacts,
         }
+
+        _persist_artifacts(
+            result,
+            requirement_path=requirement_path,
+            artifact_root=artifact_root,
+            sprint_number=sprint_number,
+            sprint_directory=sprint_directory,
+            previous_artifacts=previous_artifacts,
+        )
 
         return result
 
